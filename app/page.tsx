@@ -1,65 +1,64 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { UploadFlow } from "@/components/UploadFlow";
+import { PracticeSession } from "@/components/PracticeSession";
+import { KuroCat } from "@/components/OilCat";
+import type { ParseSource, ScriptLine } from "@/lib/types";
 
 export default function Home() {
+  const [lines, setLines] = useState<ScriptLine[] | null>(null);
+  const [source, setSource] = useState<ParseSource | null>(null);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="bg-washi relative flex min-h-full flex-1 flex-col items-center px-4 py-8 sm:py-14">
+      {/* watermark cats */}
+      <div className="pointer-events-none absolute right-6 top-8 opacity-[0.06] sm:right-14 sm:top-12" aria-hidden>
+        <KuroCat className="h-48 w-32 sm:h-56 sm:w-36" />
+      </div>
+      <div className="pointer-events-none absolute bottom-12 left-6 opacity-[0.04] sm:left-14" aria-hidden>
+        <KuroCat className="h-36 w-24 -scale-x-100 sm:h-44 sm:w-28" />
+      </div>
+
+      <header className="relative z-10 mb-10 max-w-2xl text-center">
+        <div className="mb-6 flex justify-center">
+          <KuroCat className="h-28 w-20 sm:h-32 sm:w-22" />
+        </div>
+        <p className="text-xs font-medium tracking-[0.3em] text-jp-sakura">KURONEKO</p>
+        <h1 className="mt-3 text-3xl font-bold tracking-tight text-jp-ink sm:text-4xl">
+          MC script pronunciation
+        </h1>
+        <div className="mx-auto mt-3 h-px w-20 bg-gradient-to-r from-transparent via-jp-sakura/60 to-transparent" />
+        <p className="mt-4 text-base leading-relaxed text-jp-muted">
+          Upload your Word or Excel script, listen to the model voice, then record your reading —
+          English, Mandarin, or Cantonese.
+        </p>
+        {source && (
+          <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-jp-border bg-jp-surface px-4 py-1.5 text-sm font-medium text-jp-ink shadow-sm">
+            <span className="h-2 w-2 rounded-full bg-jp-sakura" aria-hidden />
+            {source === "docx" ? "Word" : "Excel"} · {lines?.length ?? 0} segments
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+        )}
+      </header>
+
+      <div className="relative z-10 w-full max-w-lg sm:max-w-2xl">
+        {!lines ? (
+          <UploadFlow
+            onParsed={(next, src) => {
+              setLines(next);
+              setSource(src);
+            }}
+          />
+        ) : (
+          <PracticeSession
+            lines={lines}
+            onReset={() => {
+              setLines(null);
+              setSource(null);
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }

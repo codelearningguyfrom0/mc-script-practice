@@ -1,26 +1,59 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --jp-ink: #2c2c2c;
+  --jp-bg: #fdf8e8;
+  --jp-surface: #fffef9;
+  --jp-card: #faf8f2;
+  --jp-sakura: #e8a0b4;
+  --jp-sakura-soft: #fdf0f4;
+  --jp-indigo: #3d5a80;
+  --jp-vermillion: #c84b31;
+  --jp-moss: #5a7247;
+  --jp-gold: #b8942e;
+  --jp-gold-soft: #f5efd8;
+  --jp-muted: #8a8378;
+  --jp-border: #e4ded4;
+  --jp-border-dark: #ccc5b8;
+  --foreground: var(--jp-ink);
+  --background: var(--jp-bg);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-noto-jp);
   --font-mono: var(--font-geist-mono);
+  --color-jp-ink: var(--jp-ink);
+  --color-jp-bg: var(--jp-bg);
+  --color-jp-surface: var(--jp-surface);
+  --color-jp-card: var(--jp-card);
+  --color-jp-sakura: var(--jp-sakura);
+  --color-jp-sakura-soft: var(--jp-sakura-soft);
+  --color-jp-indigo: var(--jp-indigo);
+  --color-jp-vermillion: var(--jp-vermillion);
+  --color-jp-moss: var(--jp-moss);
+  --color-jp-gold: var(--jp-gold);
+  --color-jp-gold-soft: var(--jp-gold-soft);
+  --color-jp-muted: var(--jp-muted);
+  --color-jp-border: var(--jp-border);
+  --color-jp-border-dark: var(--jp-border-dark);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Washi paper texture */
+.bg-washi {
+  background-color: var(--jp-bg);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Crect width='6' height='6' fill='%23fdf8e8'/%3E%3Ccircle cx='1' cy='1' r='0.5' fill='%23f0e8c8' fill-opacity='0.3'/%3E%3Ccircle cx='4' cy='3' r='0.4' fill='%23f0e8c8' fill-opacity='0.2'/%3E%3Ccircle cx='2' cy='5' r='0.3' fill='%23f0e8c8' fill-opacity='0.25'/%3E%3C/svg%3E");
+  background-size: 6px 6px;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--jp-bg);
+  color: var(--jp-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--jp-sakura);
+  outline-offset: 2px;
 }
