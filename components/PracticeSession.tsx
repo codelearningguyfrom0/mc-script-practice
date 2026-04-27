@@ -19,6 +19,7 @@ const LOCALES: { value: SpeechLocale; label: string }[] = [
 ];
 
 const WEAK_KEY = "mc-script-weak-v1";
+const TOKEN_WORD_RE = /[\p{L}\p{N}'’-]+/gu;
 
 type WeakEntry = {
   pronunciationScore: number;
@@ -72,6 +73,7 @@ export function PracticeSession({
   const [readingAll, setReadingAll] = useState(false);
   const stopReadingRef = useRef(false);
   const [engSpeed, setEngSpeed] = useState(0); // percentage offset: -50 to +50
+  const [selectedWord, setSelectedWord] = useState<string | null>(null);
 
   useEffect(() => {
     setWeakMap(loadWeak());
@@ -102,6 +104,29 @@ export function PracticeSession({
     displayLines.length > 0
       ? displayLines[Math.min(index, displayLines.length - 1)]
       : null;
+
+  const currentTokens = useMemo(() => {
+    if (!current) return [] as { text: string; isWord: boolean }[];
+    const tokens: { text: string; isWord: boolean }[] = [];
+    let lastIdx = 0;
+    for (const match of current.text.matchAll(TOKEN_WORD_RE)) {
+      const start = match.index ?? 0;
+      const word = match[0];
+      if (start > lastIdx) {
+        tokens.push({ text: current.text.slice(lastIdx, start), isWord: false });
+      }
+      tokens.push({ text: word, isWord: true });
+      lastIdx = start + word.length;
+    }
+    if (lastIdx < current.text.length) {
+      tokens.push({ text: current.text.slice(lastIdx), isWord: false });
+    }
+    return tokens;
+  }, [current]);
+
+  useEffect(() => {
+    setSelectedWord(null);
+  }, [current?.id]);
 
   const setLocaleForLine = (id: string, locale: SpeechLocale) => {
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, locale } : l)));
@@ -154,10 +179,12 @@ export function PracticeSession({
     }
   };
 
-  const stopReading = () => {
+  const stopTts = useCallback(() => {
     stopReadingRef.current = true;
     stopPlayback();
-  };
+    setReadingAll(false);
+    setBusy((prev) => (prev === "tts" ? "idle" : prev));
+  }, []);
 
   const playModel = async () => {
     if (!current) return;
@@ -165,6 +192,19 @@ export function PracticeSession({
     setBusy("tts");
     try {
       await speakText(current.text, current.locale, rateForLocale(current.locale));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Playback failed");
+    } finally {
+      setBusy("idle");
+    }
+  };
+
+  const playSelectedWord = async () => {
+    if (!current || !selectedWord) return;
+    setErr(null);
+    setBusy("tts");
+    try {
+      await speakText(selectedWord, current.locale, rateForLocale(current.locale));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Playback failed");
     } finally {
@@ -239,14 +279,16 @@ export function PracticeSession({
   };
 
   const goNext = useCallback(() => {
+    stopTts();
     setIndex((i) => Math.min(i + 1, Math.max(displayLines.length - 1, 0)));
     setLastResult(null);
-  }, [displayLines.length]);
+  }, [displayLines.length, stopTts]);
 
   const goPrev = useCallback(() => {
+    stopTts();
     setIndex((i) => Math.max(0, i - 1));
     setLastResult(null);
-  }, []);
+  }, [stopTts]);
 
   useEffect(() => {
     if (index >= displayLines.length) {
@@ -327,7 +369,7 @@ export function PracticeSession({
           {readingAll ? (
             <button
               type="button"
-              onClick={stopReading}
+              onClick={stopTts}
               className="min-h-[40px] rounded-xl bg-jp-vermillion px-4 py-2 text-sm font-semibold text-white shadow-sm"
             >
               Stop
@@ -408,7 +450,7 @@ export function PracticeSession({
                 key={line.id}
                 ref={isCurrent ? activeOverviewRef : undefined}
                 type="button"
-                onClick={() => { setIndex(i); setLastResult(null); }}
+                onClick={() => { stopTts(); setIndex(i); setLastResult(null); }}
                 className={`w-full rounded-lg px-3 py-2 text-left text-sm leading-relaxed transition ${
                   isCurrent
                     ? "bg-jp-sakura-soft font-semibold text-jp-vermillion"
@@ -431,8 +473,40 @@ export function PracticeSession({
             : "rounded-2xl border border-jp-border bg-jp-surface p-6 text-xl font-medium leading-relaxed text-jp-ink shadow-lg shadow-jp-sakura/8 sm:p-8"
         }
       >
-        {current?.text}
+        {currentTokens.map((token, tokenIdx) => {
+          if (!token.isWord) {
+            return (
+              <span key={`sep-${tokenIdx}`} className="whitespace-pre-wrap">
+                {token.text}
+              </span>
+            );
+          }
+          const selected = selectedWord === token.text;
+          return (
+            <button
+              key={`w-${tokenIdx}-${token.text}`}
+              type="button"
+              onClick={() => setSelectedWord(token.text)}
+              className={`inline rounded px-1 transition ${
+                selected
+                  ? teleprompter
+                    ? "bg-jp-sakura text-[#1a1a1a]"
+                    : "bg-jp-sakura-soft text-jp-vermillion"
+                  : teleprompter
+                    ? "text-jp-bg hover:bg-white/20"
+                    : "hover:bg-jp-sakura-soft/70"
+              }`}
+              aria-pressed={selected}
+            >
+              {token.text}
+            </button>
+          );
+        })}
       </div>
+      <p className="text-sm text-jp-muted">
+        Tap a word to focus it, then play just that word.
+        {selectedWord ? ` Selected: "${selectedWord}"` : ""}
+      </p>
 
       <label className="flex flex-col gap-2">
         <span className="text-sm font-semibold text-jp-ink">Language for this line</span>
@@ -455,6 +529,22 @@ export function PracticeSession({
           className="min-h-[52px] min-w-[140px] rounded-xl bg-jp-moss px-4 py-3 text-base font-semibold text-white shadow-md shadow-jp-moss/20 transition hover:brightness-110 disabled:opacity-40"
         >
           {busy === "tts" ? "Playing…" : "Play model"}
+        </button>
+        <button
+          type="button"
+          disabled={busy !== "tts"}
+          onClick={stopTts}
+          className="min-h-[52px] min-w-[120px] rounded-xl bg-jp-vermillion px-4 py-3 text-base font-semibold text-white shadow-md shadow-jp-vermillion/20 transition hover:brightness-110 disabled:opacity-40"
+        >
+          Stop
+        </button>
+        <button
+          type="button"
+          disabled={busy !== "idle" || !selectedWord}
+          onClick={() => void playSelectedWord()}
+          className="min-h-[52px] min-w-[180px] rounded-xl border border-jp-moss bg-jp-surface px-4 py-3 text-base font-semibold text-jp-moss shadow-sm transition hover:bg-jp-moss/10 disabled:opacity-40"
+        >
+          Play selected word
         </button>
         <button
           type="button"
