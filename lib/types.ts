@@ -1,4 +1,13 @@
 export type SpeechLocale = "en-US" | "zh-CN" | "zh-HK";
+export type TtsStyle =
+  | "natural"
+  | "mc"
+  | "clear"
+  | "slow"
+  | "cheerful"
+  | "friendly"
+  | "serious"
+  | "empathetic";
 
 export type ScriptLine = {
   id: string;

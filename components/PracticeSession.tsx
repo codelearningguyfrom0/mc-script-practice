@@ -7,9 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import type { PracticeResult, ScriptLine, SpeechLocale } from "@/lib/types";
+import type { PracticeResult, ScriptLine, SpeechLocale, TtsStyle } from "@/lib/types";
 import { assessPronunciation, speakText, stopPlayback, setPlaybackRate } from "@/lib/speechClient";
 import { looksLikeChinese } from "@/lib/langDetect";
+import { VOICE_BY_LOCALE, VOICE_OPTIONS_BY_LOCALE } from "@/lib/voices";
 import { KuroCatFace } from "@/components/OilCat";
 
 const LOCALES: { value: SpeechLocale; label: string }[] = [
@@ -17,8 +18,24 @@ const LOCALES: { value: SpeechLocale; label: string }[] = [
   { value: "zh-CN", label: "Mandarin" },
   { value: "zh-HK", label: "Cantonese" },
 ];
+const TTS_STYLE_OPTIONS: { value: TtsStyle; label: string }[] = [
+  { value: "natural", label: "Natural" },
+  { value: "mc", label: "Professional MC" },
+  { value: "cheerful", label: "Cheerful" },
+  { value: "friendly", label: "Friendly" },
+  { value: "serious", label: "Serious / News" },
+  { value: "empathetic", label: "Empathetic" },
+  { value: "clear", label: "Clear" },
+  { value: "slow", label: "Slow practice" },
+];
+const FEMALE_MC_PRESET: Record<SpeechLocale, { voice: string; style: TtsStyle }> = {
+  "en-US": { voice: "en-US-AriaNeural", style: "mc" },
+  "zh-CN": { voice: "zh-CN-XiaoxiaoNeural", style: "serious" },
+  "zh-HK": { voice: "zh-HK-HiuMaanNeural", style: "serious" },
+};
 
 const WEAK_KEY = "mc-script-weak-v1";
+const VOICE_FAVORITES_KEY = "mc-script-voice-favorites-v1";
 const TOKEN_WORD_RE = /[\p{L}\p{N}'’-]+/gu;
 
 type WeakEntry = {
@@ -74,10 +91,37 @@ export function PracticeSession({
   const stopReadingRef = useRef(false);
   const [engSpeed, setEngSpeed] = useState(0); // percentage offset: -50 to +50
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
+  const [ttsStyle, setTtsStyle] = useState<TtsStyle>("natural");
+  const [voiceByLocale, setVoiceByLocale] = useState<Record<SpeechLocale, string>>(VOICE_BY_LOCALE);
+  const [voiceQuery, setVoiceQuery] = useState("");
+  const [favoriteVoices, setFavoriteVoices] = useState<Record<SpeechLocale, string[]>>({
+    "en-US": [],
+    "zh-CN": [],
+    "zh-HK": [],
+  });
 
   useEffect(() => {
     setWeakMap(loadWeak());
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VOICE_FAVORITES_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<Record<SpeechLocale, string[]>>;
+      setFavoriteVoices({
+        "en-US": parsed["en-US"] ?? [],
+        "zh-CN": parsed["zh-CN"] ?? [],
+        "zh-HK": parsed["zh-HK"] ?? [],
+      });
+    } catch {
+      // ignore bad local data
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(VOICE_FAVORITES_KEY, JSON.stringify(favoriteVoices));
+  }, [favoriteVoices]);
 
   useEffect(() => {
     if (!teleprompter || !lineRef.current) return;
@@ -140,6 +184,20 @@ export function PracticeSession({
     },
     [chineseLang],
   );
+  const currentSpeakLocale: SpeechLocale = current ? resolveLocale(current) : "en-US";
+  const allVoiceOptions = VOICE_OPTIONS_BY_LOCALE[currentSpeakLocale];
+  const filteredVoiceOptions = useMemo(() => {
+    const q = voiceQuery.trim().toLowerCase();
+    if (!q) return allVoiceOptions;
+    return allVoiceOptions.filter(
+      (v) =>
+        v.label.toLowerCase().includes(q) || v.value.toLowerCase().includes(q),
+    );
+  }, [allVoiceOptions, voiceQuery]);
+  const favoriteVoiceOptions = useMemo(() => {
+    const favSet = new Set(favoriteVoices[currentSpeakLocale]);
+    return allVoiceOptions.filter((v) => favSet.has(v.value));
+  }, [allVoiceOptions, currentSpeakLocale, favoriteVoices]);
 
   const engSpeedRef = useRef(engSpeed);
   engSpeedRef.current = engSpeed;
@@ -156,6 +214,29 @@ export function PracticeSession({
     setPlaybackRate(1 + engSpeed / 100);
   }, [engSpeed]);
 
+  useEffect(() => {
+    setVoiceQuery("");
+  }, [currentSpeakLocale]);
+
+  const toggleFavoriteVoice = (locale: SpeechLocale, voiceName: string) => {
+    setFavoriteVoices((prev) => {
+      const currentList = prev[locale] ?? [];
+      const hasVoice = currentList.includes(voiceName);
+      return {
+        ...prev,
+        [locale]: hasVoice
+          ? currentList.filter((v) => v !== voiceName)
+          : [...currentList, voiceName],
+      };
+    });
+  };
+
+  const applyFemaleMcPreset = () => {
+    const preset = FEMALE_MC_PRESET[currentSpeakLocale];
+    setTtsStyle(preset.style);
+    setVoiceByLocale((prev) => ({ ...prev, [currentSpeakLocale]: preset.voice }));
+  };
+
   const readAll = async (startFrom = 0) => {
     setReadingAll(true);
     stopReadingRef.current = false;
@@ -167,7 +248,11 @@ export function PracticeSession({
         setIndex(i);
         const line = displayLines[i];
         const locale = resolveLocale(line);
-        await speakText(line.text, locale, rateForLocale(locale));
+        await speakText(line.text, locale, {
+          playbackRate: rateForLocale(locale),
+          style: ttsStyle,
+          voiceName: voiceByLocale[locale],
+        });
       }
     } catch (e) {
       if (!stopReadingRef.current) {
@@ -191,7 +276,11 @@ export function PracticeSession({
     setErr(null);
     setBusy("tts");
     try {
-      await speakText(current.text, current.locale, rateForLocale(current.locale));
+      await speakText(current.text, currentSpeakLocale, {
+        playbackRate: rateForLocale(currentSpeakLocale),
+        style: ttsStyle,
+        voiceName: voiceByLocale[currentSpeakLocale],
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Playback failed");
     } finally {
@@ -204,7 +293,11 @@ export function PracticeSession({
     setErr(null);
     setBusy("tts");
     try {
-      await speakText(selectedWord, current.locale, rateForLocale(current.locale));
+      await speakText(selectedWord, currentSpeakLocale, {
+        playbackRate: rateForLocale(currentSpeakLocale),
+        style: ttsStyle,
+        voiceName: voiceByLocale[currentSpeakLocale],
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Playback failed");
     } finally {
@@ -410,6 +503,88 @@ export function PracticeSession({
             {engSpeed === 0 ? "Normal" : `${engSpeed > 0 ? "+" : ""}${engSpeed}%`}
           </span>
         </div>
+        <div className="flex w-full items-center gap-3 border-t border-jp-border pt-3">
+          <span className="shrink-0 text-sm font-semibold text-jp-ink">Voice style:</span>
+          <select
+            value={ttsStyle}
+            onChange={(e) => setTtsStyle(e.target.value as TtsStyle)}
+            className="min-w-[12rem] rounded-lg border border-jp-border bg-jp-surface px-3 py-2 text-sm font-medium text-jp-ink focus:border-jp-sakura focus:ring-2 focus:ring-jp-sakura/20"
+          >
+            {TTS_STYLE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={applyFemaleMcPreset}
+            className="rounded-lg border border-jp-border bg-jp-surface px-3 py-2 text-xs font-semibold text-jp-ink transition hover:border-jp-sakura/50"
+          >
+            Female MC preset
+          </button>
+        </div>
+        <div className="flex w-full items-center gap-3 border-t border-jp-border pt-3">
+          <span className="shrink-0 text-sm font-semibold text-jp-ink">Speech Studio voice:</span>
+          <input
+            type="text"
+            value={voiceQuery}
+            onChange={(e) => setVoiceQuery(e.target.value)}
+            placeholder="Search voice name..."
+            className="min-w-[13rem] rounded-lg border border-jp-border bg-jp-surface px-3 py-2 text-sm text-jp-ink focus:border-jp-sakura focus:ring-2 focus:ring-jp-sakura/20"
+          />
+          <select
+            value={voiceByLocale[currentSpeakLocale]}
+            onChange={(e) =>
+              setVoiceByLocale((prev) => ({ ...prev, [currentSpeakLocale]: e.target.value }))
+            }
+            className="min-w-[18rem] rounded-lg border border-jp-border bg-jp-surface px-3 py-2 text-sm font-medium text-jp-ink focus:border-jp-sakura focus:ring-2 focus:ring-jp-sakura/20"
+          >
+            {filteredVoiceOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => toggleFavoriteVoice(currentSpeakLocale, voiceByLocale[currentSpeakLocale])}
+            className="rounded-lg border border-jp-border bg-jp-surface px-3 py-2 text-xs font-semibold text-jp-ink transition hover:border-jp-sakura/50"
+          >
+            {favoriteVoices[currentSpeakLocale].includes(voiceByLocale[currentSpeakLocale])
+              ? "Unfavorite"
+              : "Favorite"}
+          </button>
+        </div>
+        {favoriteVoiceOptions.length > 0 && (
+          <div className="flex w-full flex-wrap items-center gap-2 border-t border-jp-border pt-3">
+            <span className="text-sm font-semibold text-jp-ink">Favorites:</span>
+            {favoriteVoiceOptions.map((opt) => {
+              const selected = voiceByLocale[currentSpeakLocale] === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() =>
+                    setVoiceByLocale((prev) => ({ ...prev, [currentSpeakLocale]: opt.value }))
+                  }
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    selected
+                      ? "border-jp-sakura bg-jp-sakura-soft text-jp-vermillion"
+                      : "border-jp-border bg-jp-surface text-jp-ink hover:border-jp-sakura/50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {filteredVoiceOptions.length === 0 && (
+          <p className="w-full border-t border-jp-border pt-3 text-sm text-jp-muted">
+            No voices found for this search.
+          </p>
+        )}
       </div>
 
       {shadowing && (

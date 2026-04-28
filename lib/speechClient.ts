@@ -1,4 +1,4 @@
-import type { PracticeResult, SpeechLocale } from "./types";
+import type { PracticeResult, SpeechLocale, TtsStyle } from "./types";
 import { VOICE_BY_LOCALE } from "./voices";
 
 async function getToken(): Promise<{ token: string; region: string }> {
@@ -21,6 +21,73 @@ function baseSpeechConfig(
 
 let currentAudio: HTMLAudioElement | null = null;
 
+type SpeakOptions = {
+  playbackRate?: number;
+  style?: TtsStyle;
+  voiceName?: string;
+};
+
+function escapeXml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function styleToSsml(locale: SpeechLocale, style: TtsStyle): { styleName?: string; rate: string } {
+  if (style === "slow") return { rate: "-15.00%" };
+  if (style === "mc") {
+    if (locale === "en-US") return { styleName: "newscast", rate: "-2.00%" };
+    return { rate: "-3.00%" };
+  }
+  if (style === "cheerful") {
+    return { styleName: "cheerful", rate: "2.00%" };
+  }
+  if (style === "friendly") {
+    if (locale === "en-US") return { styleName: "customerservice", rate: "0.00%" };
+    return { styleName: "chat", rate: "0.00%" };
+  }
+  if (style === "serious") {
+    if (locale === "en-US") return { styleName: "newscast", rate: "-2.00%" };
+    return { rate: "-2.00%" };
+  }
+  if (style === "empathetic") {
+    return { styleName: "empathetic", rate: "-3.00%" };
+  }
+  if (style === "clear") {
+    if (locale === "en-US") return { styleName: "newscast", rate: "0.00%" };
+    return { rate: "0.00%" };
+  }
+  if (locale === "en-US") return { styleName: "chat", rate: "-5.00%" };
+  return { rate: "0.00%" };
+}
+
+function buildSsml(
+  text: string,
+  locale: SpeechLocale,
+  style: TtsStyle,
+  voiceName?: string,
+  disableExpressStyle = false,
+): string {
+  const voice = voiceName ?? VOICE_BY_LOCALE[locale];
+  const safe = escapeXml(text);
+  const { styleName, rate } = styleToSsml(locale, style);
+  const body = styleName && !disableExpressStyle
+    ? `<mstts:express-as style="${styleName}">${safe}</mstts:express-as>`
+    : safe;
+  return [
+    `<speak version="1.0" xml:lang="${locale}" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="http://www.w3.org/2001/mstts">`,
+    `<voice name="${voice}">`,
+    `<prosody rate="${rate}">`,
+    body,
+    `</prosody>`,
+    `</voice>`,
+    `</speak>`,
+  ].join("");
+}
+
 /** Immediately stop any TTS audio that is currently playing. */
 export function stopPlayback() {
   if (currentAudio) {
@@ -39,22 +106,39 @@ export function setPlaybackRate(rate: number) {
 export async function speakText(
   text: string,
   locale: SpeechLocale,
-  playbackRate = 1,
+  options: SpeakOptions = {},
 ): Promise<void> {
+  const playbackRate = options.playbackRate ?? 1;
+  const style = options.style ?? "natural";
+  const voiceName = options.voiceName ?? VOICE_BY_LOCALE[locale];
   const sdk = await import("microsoft-cognitiveservices-speech-sdk");
   const { token, region } = await getToken();
   const speechConfig = baseSpeechConfig(sdk, token, region);
-  speechConfig.speechSynthesisVoiceName = VOICE_BY_LOCALE[locale];
+  speechConfig.speechSynthesisVoiceName = voiceName;
   speechConfig.speechSynthesisOutputFormat =
     sdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3;
 
   const synthesizer = new sdk.SpeechSynthesizer(speechConfig, null as never);
   try {
-    const result = await new Promise<import("microsoft-cognitiveservices-speech-sdk").SpeechSynthesisResult>(
+    let ssml = buildSsml(text, locale, style, voiceName);
+    let result = await new Promise<import("microsoft-cognitiveservices-speech-sdk").SpeechSynthesisResult>(
       (resolve, reject) => {
-        synthesizer.speakTextAsync(text, (r) => resolve(r), (err) => reject(err));
+        synthesizer.speakSsmlAsync(ssml, (r) => resolve(r), (err) => reject(err));
       },
     );
+
+    // Some voices do not support all express-as styles. Fallback gracefully.
+    if (
+      result.reason !== sdk.ResultReason.SynthesizingAudioCompleted &&
+      result.errorDetails?.toLowerCase().includes("style")
+    ) {
+      ssml = buildSsml(text, locale, style, voiceName, true);
+      result = await new Promise<import("microsoft-cognitiveservices-speech-sdk").SpeechSynthesisResult>(
+        (resolve, reject) => {
+          synthesizer.speakSsmlAsync(ssml, (r) => resolve(r), (err) => reject(err));
+        },
+      );
+    }
 
     if (result.reason !== sdk.ResultReason.SynthesizingAudioCompleted) {
       throw new Error(`TTS failed: ${result.errorDetails ?? result.reason}`);
