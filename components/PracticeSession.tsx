@@ -242,17 +242,26 @@ export function PracticeSession({
     stopReadingRef.current = false;
     setLastResult(null);
     setBusy("tts");
+    const errors: string[] = [];
     try {
       for (let i = startFrom; i < displayLines.length; i++) {
         if (stopReadingRef.current) break;
         setIndex(i);
         const line = displayLines[i];
         const locale = resolveLocale(line);
-        await speakText(line.text, locale, {
-          playbackRate: rateForLocale(locale),
-          style: ttsStyle,
-          voiceName: voiceByLocale[locale],
-        });
+        try {
+          await speakText(line.text, locale, {
+            playbackRate: rateForLocale(locale),
+            style: ttsStyle,
+            voiceName: voiceByLocale[locale],
+          });
+        } catch (e) {
+          // Continue with the rest of the script even if one line/voice combo fails.
+          errors.push(e instanceof Error ? e.message : "Playback failed");
+        }
+      }
+      if (errors.length > 0 && !stopReadingRef.current) {
+        setErr(`Some lines could not be played (${errors.length}). Try another voice/style.`);
       }
     } catch (e) {
       if (!stopReadingRef.current) {
@@ -658,9 +667,8 @@ export function PracticeSession({
           }
           const selected = selectedWord === token.text;
           return (
-            <button
+            <span
               key={`w-${tokenIdx}-${token.text}`}
-              type="button"
               onClick={() => setSelectedWord(token.text)}
               className={`inline rounded px-1 transition ${
                 selected
@@ -670,11 +678,19 @@ export function PracticeSession({
                   : teleprompter
                     ? "text-jp-bg hover:bg-white/20"
                     : "hover:bg-jp-sakura-soft/70"
-              }`}
+              } select-text cursor-pointer`}
+              role="button"
+              tabIndex={0}
               aria-pressed={selected}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedWord(token.text);
+                }
+              }}
             >
               {token.text}
-            </button>
+            </span>
           );
         })}
       </div>
